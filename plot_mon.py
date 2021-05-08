@@ -4,52 +4,37 @@ import time
 import re
 import os
 import glob
+import logging
 from prometheus_client import Counter
 from prometheus_client import Gauge
 from prometheus_client import Enum
 
 ### globals
-scan_interval_s = 5
-plot_log_dir = "./logs/plotter/*"
+scan_interval_s = 5.111
+plot_log_dir = "./logs/plotter/chia2/*"
 logs = {}
 node_info = {}
-g_plot_phases = {}
-
+t_tmpdir_dev = {"/media/chia2/plot1/plot2": "nvme1n1",
+                "/media/chia2/plot1/tmp": "nvme1n1",
+                "/media/chia2/plot2/plot1": "nvme2n1",
+                "/media/chia2/plot2/tmp": "nvme2n1",
+                "/media/chia2/plot3/plot3": "nvme3n1",
+                "/media/chia2/plot3/tmp": "nvme3n1",
+                "/media/chia2/plot4/tmp": "nvme4n1",}
 g_plot_phases = Gauge("plot_phases", "Plot Phases", labelnames=["device", "curr_phase"])
-#g_plot_phases["2"] = Gauge("plots_phase_2", "Number of plots in Phase 2.", labelnames=["device"])
-#g_plot_phases["3"] = Gauge("plots_phase_3", "Number of plots in Phase 3.", labelnames=["device"])
-#g_plot_phases["4"] = Gauge("plots_phase_4", "Number of plots in Phase 4.", labelnames=["device"])
-#g_plot_phases["copy"] = Gauge("plots_phase_copy", "Number of plots currently copied.", labelnames=["device"])
-#g_plot_phases["fin"] = Gauge("plots_phase_fin", "Number of plots finished.", labelnames=["device"])
 
-# Create a metric to track time spent and requests made.
-# REQUEST_TIME = Summary('request_processing_seconds', 'Time spent processing request')
+logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s',
+                    handlers=[
+                        logging.FileHandler("debug.log"),
+                        logging.StreamHandler()],
+                    level=logging.DEBUG)
 
-# # Decorate function with metric.
-# @REQUEST_TIME.time()
-# def process_request(t):
-#     """A dummy function that takes some time."""
-#     #c.inc(1.6)  # Increment by given value
-#     time.sleep(t)
-
-# if __name__ == '__main__':
-#     # Start up the server to expose the metrics.
-#     start_http_server(8000)
-#     # Generate some requests.
-#     c = Counter('my_failures', 'Description of counter')
-#     g = Counter('my_gauge', 'My Description of a gauge', ['label_a', 'label_b'])
-#     g.labels('a', 'b').inc()
-#     while True:
-#         process_request(random.random())
-
-######################################################
 
 # metrics to collect:
 # plot_status{dir,k,file/id}=["Phase1", "Phase2", "Phase3", "Phase4", "Finished"]
 # 
 
 # read log files
-
 def scan_plot_logs(dir_path, curr_logs):
     plot_name_regex = r"plotter_log_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.txt"
     # get all files in dir
@@ -59,13 +44,31 @@ def scan_plot_logs(dir_path, curr_logs):
     files = list(filter(lambda f: re.match(plot_name_regex, os.path.basename(f)), files))
     files = list(filter(lambda f: os.path.getsize(f) > 0, files))
 
+    # check for which log entry there is no more file and then remove entry
+    curr_logs = dict(list(filter(lambda t: t[0] in files, curr_logs.items())))
+
     # for all matched plotfiles:
     for f in files:
         if f not in curr_logs:
-            curr_logs[f] = {"device": "?", "k": "?", "status": "Unknown", "num_read": 0}
+            curr_logs[f] = {"device": None, "status": "Unknown", "num_read": 0}
+        if curr_logs[f]["device"] == None:
+            lines_read = []
+            with open(f, mode="r") as fd:
+                lines_read = fd.readlines()
+            dir_plot = extract_plot_filepath(lines_read)
+            if dir_plot is not None:
+                if dir_plot not in t_tmpdir_dev:
+                    logging.warning(f"Could not find plot dir '{dir_plot}' in table.")
+                else:
+                    d = t_tmpdir_dev[dir_plot]
+                    logging.info(f"Set device = {d} for plot '{f}'")
+                    curr_logs[f]["device"] = d
+            else:
+                logging.warning(f"Could not find plot tmp dir for logfile: '{f}'")
         # if plotfile size differs with entry in log
         if curr_logs[f]["num_read"] != os.path.getsize(f):
             # read difference
+            lines_read = []
             with open(f, mode="r") as fd:
                 fd.seek(curr_logs[f]["num_read"])
                 lines_read = fd.readlines()
@@ -76,6 +79,20 @@ def scan_plot_logs(dir_path, curr_logs):
                 curr_logs[f]["status"] = ph
             curr_logs[f]["num_read"] = os.path.getsize(f)
     return curr_logs
+
+def extract_plot_filepath(lines_read):
+    plot_dir_regex = r"Starting plotting progress into temporary dirs: (.*?) and (.*?)$"
+    for l in lines_read:
+        m = re.match(plot_dir_regex, l)
+        if m:
+            tmp_dirs = m.groups()
+            print(tmp_dirs)
+            if len(tmp_dirs) != 2:
+                logging.warning(f"Number of tmp plot dirs is: {len(tmp_dirs)}. Should be 2.")
+            if tmp_dirs[0] != tmp_dirs[1]:
+                logging.warning(f"Tmp plot dirs are different: '{tmp_dirs[0]}' and '{tmp_dirs[1]}'")
+            return tmp_dirs[0]
+    return None
 
 def extract_phase(new_lines):
     status = "Unknown"
@@ -95,27 +112,29 @@ def extract_phase(new_lines):
 
 def update_node_status(logs):
     g_plot_phases.clear()
-    g_plot_phases.labels("devb", "Phase 1").inc()
     for p, stats in logs.items():
-        g_plot_phases.labels("dev", stats["status"]).inc()
+        g_plot_phases.labels(stats["device"], stats["status"]).inc()
         
 
 
 if __name__ == "__main__":
+    # logging.basicConfig(format='%(asctime)s %(message)s')
+    logging.debug("###########################################################")
+    logging.debug(f"Application startup.")
     # start node exporter
     start_http_server(8000)
     try:
         while True:
             # scan plotter log dir
-            print(f"scan log dir ...")
+            logging.debug(f"scan log dir {plot_log_dir}")
             logs = scan_plot_logs(plot_log_dir, logs)
 
             # generate node info
-            print(f"update node stats ...")
+            logging.debug(f"update node stats ...")
             update_node_status(logs)
 
             # sleep
-            print(f"sleep {scan_interval_s}s")
+            logging.debug(f"sleep {scan_interval_s}s")
             time.sleep(scan_interval_s)
     except KeyboardInterrupt:
         # do exit stuff
