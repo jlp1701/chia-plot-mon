@@ -14,6 +14,8 @@ scan_interval_s = 5.111
 plot_log_dir = "./logs/plotter/chia2/*"
 logs = {}
 node_info = {}
+devices = ["nvme1n1", "nvme2n1", "nvme3n1", "nvme4n1"]
+phases = ["Phase 1", "Phase 2", "Phase 3", "Phase 4", "Copying", "Finished"]
 t_tmpdir_dev = {"/media/chia2/plot1/plot2": "nvme1n1",
                 "/media/chia2/plot1/tmp": "nvme1n1",
                 "/media/chia2/plot2/plot1": "nvme2n1",
@@ -111,7 +113,9 @@ def extract_phase(new_lines):
 
 
 def update_node_status(logs):
-    g_plot_phases.clear()
+    for d in devices:
+        for p in phases:
+            g_plot_phases.labels(d, p).set(0)
     for p, stats in logs.items():
         g_plot_phases.labels(stats["device"], stats["status"]).inc()
         
