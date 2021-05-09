@@ -11,18 +11,16 @@ from prometheus_client import Enum
 
 ### globals
 scan_interval_s = 5.111
-plot_log_dir = "./logs/plotter/chia2/*"
+plot_log_dir = "/home/chia2/.chia/mainnet/plotter/*"
 logs = {}
 node_info = {}
 devices = ["nvme1n1", "nvme2n1", "nvme3n1", "nvme4n1"]
 phases = ["Phase 1", "Phase 2", "Phase 3", "Phase 4", "Copying", "Finished"]
-t_tmpdir_dev = {"/media/chia2/plot1/plot2": "nvme1n1",
-                "/media/chia2/plot1/tmp": "nvme1n1",
-                "/media/chia2/plot2/plot1": "nvme2n1",
-                "/media/chia2/plot2/tmp": "nvme2n1",
-                "/media/chia2/plot3/plot3": "nvme3n1",
-                "/media/chia2/plot3/tmp": "nvme3n1",
-                "/media/chia2/plot4/tmp": "nvme4n1",}
+t_tmpdir_dev = {"/media/chia2/plot1/tmp": "nvme1n1",
+        "/media/chia2/plot1/plot2": "nvme1n1",
+		"/media/chia2/plot2/tmp": "nvme2n1",
+		"/media/chia2/plot3/tmp": "nvme3n1",
+		"/media/chia2/plot4/tmp": "nvme4n1",}
 g_plot_phases = Gauge("plot_phases", "Plot Phases", labelnames=["device", "curr_phase"])
 
 logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s',
