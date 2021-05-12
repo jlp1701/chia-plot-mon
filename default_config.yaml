@@ -1,0 +1,8 @@
+node_port: 8000
+scan_interval_s: 10
+plot_log_dir: "./logs/plotter/chia1/*"
+map_dev_tmpdir:
+  "nvme0n1": ["/media/asus/plot000/tmp", "/media/asus/nvme0n1/plot001", "/media/asus/nvme0n1"]
+  "nvme1n1": ["/media/asus/plot001/tmp", "/media/asus/nvme1n1/plot002", "/media/asus/nvme1n1"]
+  "nvme2n1": ["/media/asus/plot002/tmp", "/media/asus/nvme2n1/plot003", "/media/asus/nvme2n1"]
+  "nvme3n1": ["/media/asus/plot003/tmp", "/media/asus/nvme3n1/plot004", "/media/asus/nvme3n1"]

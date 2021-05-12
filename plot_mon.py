@@ -1,26 +1,21 @@
 from prometheus_client import start_http_server, Summary
-import random
 import time
 import re
 import os
 import glob
 import logging
-from prometheus_client import Counter
+import sys
+import yaml
 from prometheus_client import Gauge
-from prometheus_client import Enum
 
-### globals
+### globals; will be overwritten by values in config file
 scan_interval_s = 5.111
-plot_log_dir = "/home/chia2/.chia/mainnet/plotter/*"
+plot_log_dir = ""
 logs = {}
 node_info = {}
-devices = ["nvme1n1", "nvme2n1", "nvme3n1", "nvme4n1"]
 phases = ["Phase 1", "Phase 2", "Phase 3", "Phase 4", "Copying", "Finished"]
-t_tmpdir_dev = {"/media/chia2/plot1/tmp": "nvme1n1",
-        "/media/chia2/plot1/plot2": "nvme1n1",
-		"/media/chia2/plot2/tmp": "nvme2n1",
-		"/media/chia2/plot3/tmp": "nvme3n1",
-		"/media/chia2/plot4/tmp": "nvme4n1",}
+devices = []
+t_tmpdir_dev = {}
 g_plot_phases = Gauge("plot_phases", "Plot Phases", labelnames=["device", "curr_phase"])
 
 logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s',
@@ -36,7 +31,8 @@ logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s',
 
 # read log files
 def scan_plot_logs(dir_path, curr_logs):
-    plot_name_regex = r"plotter_log_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.txt"
+    # plot_name_regex = r"plotter_log_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.txt"
+    plot_name_regex = r"[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}:[0-9]{2}:[0-9]{2}\.log"
     # get all files in dir
     files = glob.glob(plot_log_dir)
 
@@ -67,17 +63,21 @@ def scan_plot_logs(dir_path, curr_logs):
                 logging.warning(f"Could not find plot tmp dir for logfile: '{f}'")
         # if plotfile size differs with entry in log
         if curr_logs[f]["num_read"] != os.path.getsize(f):
+            logging.info(f"File size '{f}' differs. Reading content ...")
             # read difference
             lines_read = []
             with open(f, mode="r") as fd:
                 fd.seek(curr_logs[f]["num_read"])
                 lines_read = fd.readlines()
             # extract phase
+            logging.info(f"Read {len(lines_read)} new lines.")
             ph = extract_phase(lines_read)
             if ph != "Unknown":
                 print(f"Set new status: {ph} for file: {os.path.basename(f)}")
                 curr_logs[f]["status"] = ph
-            curr_logs[f]["num_read"] = os.path.getsize(f)
+                curr_logs[f]["num_read"] = os.path.getsize(f)
+            else:
+                logging.debug(f"Parsed Unknown phase of logfile. Current phase: {curr_logs[f]['status']}. Discarding read lines. File: '{f}'")
     return curr_logs
 
 def extract_plot_filepath(lines_read):
@@ -111,6 +111,7 @@ def extract_phase(new_lines):
 
 
 def update_node_status(logs):
+    # raise NotImplementedError("possible device data mismatch of 'devices' and 't_tmpdir_dev' in config; solution: remove devices from config and extract all devices from t_tmpdir_dev")
     for d in devices:
         for p in phases:
             g_plot_phases.labels(d, p).set(0)
@@ -123,8 +124,27 @@ if __name__ == "__main__":
     # logging.basicConfig(format='%(asctime)s %(message)s')
     logging.debug("###########################################################")
     logging.debug(f"Application startup.")
+    
+    # check for yaml config file
+    if not os.path.exists("./config.yaml"):
+        logging.error("Can't find config file 'config.yaml' in working dir. Exiting ...")
+        sys.exit(1)
+    with open("config.yaml", "r") as fd:
+        plot_cfg = yaml.safe_load(fd)
+    
+    scan_interval_s = plot_cfg["scan_interval_s"]
+    plot_log_dir = plot_cfg["plot_log_dir"]
+    map_dev_tmpdir = plot_cfg["map_dev_tmpdir"]
+
+    # extract devices from map_dev_tmpdir
+    devices = list(map_dev_tmpdir.keys())
+
+    # create dict with tmpdir -> device
+    t_tmpdir_dev = dict([(v, k) for k, d_list in map_dev_tmpdir.items() for v in d_list])
+
     # start node exporter
-    start_http_server(8000)
+    logging.info(f"Starting prometheus node on 'localhost:{plot_cfg['node_port']}'")
+    start_http_server(plot_cfg['node_port'])
     try:
         while True:
             # scan plotter log dir
@@ -140,5 +160,6 @@ if __name__ == "__main__":
             time.sleep(scan_interval_s)
     except KeyboardInterrupt:
         # do exit stuff
+        logging.info("Gracefully exiting ...")
         sys.exit()
     
